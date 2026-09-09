@@ -1,2 +1,2 @@
 # LLM 
-Well its a project probably trying to build an LLM from scratch so yeah.
+I made a GPT model (50M parameters) that corrects gramatical sentences.
