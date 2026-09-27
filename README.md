@@ -1,35 +1,49 @@
 # Grammar Correction GPT
 
-A ~45M parameter GPT model I built from scratch in PyTorch. It's pre-trained on TinyStories and then fine-tuned to correct grammatical errors in English sentences.
+A decoder-only transformer built from scratch in PyTorch and fine-tuned for English grammatical error correction. The project implements the model architecture directly—without Hugging Face model classes—then provides scripts for pre-training, task-specific fine-tuning, and interactive inference.
 
-No HuggingFace model classes — the entire architecture (attention, MLP, transformer blocks) is written by hand in `Model.py`.
+## Highlights
+
+- Approximately 45 million parameters
+- Custom causal self-attention, MLP, transformer block, and generation code
+- GPT-2 BPE tokenization through `tiktoken`
+- PyTorch scaled dot-product attention with causal masking
+- Pre-training on the TinyStories dataset
+- Prompt-masked fine-tuning on grammar-correction pairs
+- Interactive command-line correction agent
 
 ## Architecture
 
-Standard GPT-2 style decoder-only transformer with pre-layer normalization:
+The default configuration is a GPT-2-style, pre-layer-normalized transformer:
 
-- 6 transformer blocks, 512 embedding dim, 6 attention heads
-- 256 token context window, GPT-2 BPE tokenizer (50,257 vocab via `tiktoken`)
-- GELU activations, 4x MLP expansion
-- FlashAttention via PyTorch's `scaled_dot_product_attention`
-- Weight tying between token embeddings and the output projection
+| Setting | Value |
+|---|---:|
+| Transformer blocks | 6 |
+| Embedding dimension | 512 |
+| Attention heads | 6 |
+| Context length | 256 tokens |
+| Vocabulary | 50,257 tokens |
+| MLP expansion | 4× |
+| Dropout | 0.1 |
 
-## Training
+Token embeddings are tied to the output projection. Generation uses temperature scaling and top-k sampling.
 
-### Pre-training (`train.py`)
+## Training pipeline
 
-Trained on the [TinyStories](https://huggingface.co/datasets/roneneldan/TinyStories) dataset using streaming. Standard next-token prediction with AdamW (lr=3e-4), bfloat16 mixed precision, and gradient accumulation (effective batch size of 64). Saves full checkpoints (model + optimizer + step counter) to `gpt_weights.pt`.
+### 1. Pre-training
 
-### Fine-tuning for grammar correction
+`train.py` streams [TinyStories](https://huggingface.co/datasets/roneneldan/TinyStories) and trains with next-token prediction, AdamW, bfloat16 autocasting, and gradient accumulation. Full checkpoints—including the model, optimizer, and step—are written to `gpt_weights.pt`.
 
-There are two fine-tuning scripts — pick whichever fits your needs:
+### 2. Grammar fine-tuning
 
-**`finetune_synthetic.py`** — Fine-tunes on [JFLEG](https://huggingface.co/datasets/jhu-clsp/jfleg) only (~750 sentence pairs). Quick to run but limited data.
+Two alternatives are included:
 
-**`finetune_blended.py`** — Blends JFLEG with 20k pairs from [agentlans/grammar-correction](https://huggingface.co/datasets/agentlans/grammar-correction). Runs for 8k steps and generally produces better results.
+- `finetune_synthetic.py`: fine-tunes on [JFLEG](https://huggingface.co/datasets/jhu-clsp/jfleg)
+- `finetune_blended.py`: combines JFLEG with 20,000 examples from [agentlans/grammar-correction](https://huggingface.co/datasets/agentlans/grammar-correction)
 
-Both use the same prompt format:
-```
+Both scripts use this prompt format:
+
+```text
 ### Input:
 {ungrammatical sentence}
 
@@ -37,60 +51,65 @@ Both use the same prompt format:
 {corrected sentence}<|endoftext|>
 ```
 
-The loss is masked so the model only learns to generate the correction, not echo the prompt. Output goes to `grammar_gpt_weights.pt`.
+The prompt tokens are masked from the loss so that optimization focuses on the correction. The resulting task checkpoint is saved as `grammar_gpt_weights.pt`.
 
-## Results
+## Example outputs
 
-Some examples from the interactive agent:
-
-| Input | Output |
+| Input | Generated correction |
 |---|---|
-| She go to school yesterday. | She went to school yesterday. |
-| I has a big dog. | I have a big dog. |
-| The childs are playing. | The children are playing. |
-| He don't knows the answer. | He doesn't know the answer. |
+| `She go to school yesterday.` | `She went to school yesterday.` |
+| `I has a big dog.` | `I have a big dog.` |
+| `The childs are playing.` | `The children are playing.` |
+| `He don't knows the answer.` | `He doesn't know the answer.` |
 
-It handles subject-verb agreement, tense errors, pluralization, and auxiliary verb mistakes reasonably well.
+These examples illustrate the saved model's behavior; this small model can still produce incorrect or incomplete corrections.
 
-## Usage
+## Installation
 
-### Install dependencies
+Python 3.10+ and a CUDA-capable GPU are recommended for training.
 
 ```bash
 pip install torch tiktoken datasets python-dotenv
 ```
 
-### Run the grammar correction agent
+Optional settings can be placed in a `.env` file. Configuration includes model dimensions, batch sizes, learning rates, step counts, evaluation intervals, gradient accumulation, sampling temperature, and top-k.
+
+## Usage
+
+Run the included fine-tuned checkpoint through the interactive agent:
 
 ```bash
 python agent.py
 ```
 
-It loads `grammar_gpt_weights.pt` and gives you an interactive prompt to type sentences.
-
-### Train from scratch
+Train the full pipeline:
 
 ```bash
-# pre-train on TinyStories
 python train.py
-
-# fine-tune (pick one)
-python finetune_synthetic.py
 python finetune_blended.py
 ```
 
-### Configuration
+For the smaller JFLEG-only experiment, replace the second command with:
 
-Hyperparameters are read from environment variables (or a `.env` file). Defaults are sensible so you don't need to set anything to get started — check the top of each script to see what's configurable.
-
-## Files
-
+```bash
+python finetune_synthetic.py
 ```
-Model.py                 - GPT architecture
-train.py                 - pre-training on TinyStories
-finetune_synthetic.py    - fine-tune on JFLEG only
-finetune_blended.py      - fine-tune on JFLEG + synthetic data
-agent.py                 - interactive grammar correction CLI
-gpt_weights.pt           - pre-trained checkpoint (~583 MB)
-grammar_gpt_weights.pt   - fine-tuned checkpoint (~195 MB)
+
+## Repository structure
+
+```text
+Model.py                 Transformer architecture and generation
+train.py                 TinyStories pre-training
+finetune_synthetic.py    JFLEG fine-tuning
+finetune_blended.py      Blended grammar-correction fine-tuning
+agent.py                 Interactive correction CLI
+gpt_weights.pt           Base-language-model checkpoint
+grammar_gpt_weights.pt   Fine-tuned grammar checkpoint
 ```
+
+## Limitations
+
+- The training scripts are designed around CUDA and bfloat16 execution.
+- The 256-token context window is intended for short correction prompts.
+- Evaluation is currently qualitative; the repository does not include a benchmark score on a held-out grammatical-error-correction test set.
+- Model checkpoints are large and may be slow to download or load on CPU-only machines.
